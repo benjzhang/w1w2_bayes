@@ -27,20 +27,21 @@ print(f"Using device: {device}")
 
 
 # ============================================================================
-# Target Distribution: 1D Conditional
+# Target Distribution: 1D Conditional (full support)
 # ============================================================================
 # y ~ Uniform(-3, 3)
-# x | y ~ Gamma(2, 0.3) + tanh(y)
+# x | y ~ N(tanh(y), 0.5^2)  — Gaussian with y-dependent mean
 
 def sample_y_marginal(n):
     """Sample from marginal p(y) = Uniform(-3, 3)."""
     return np.random.uniform(-3, 3, n)
 
 def sample_x_given_y(y):
-    """Sample x | y ~ Gamma(2, 0.3) + tanh(y)."""
+    """Sample x | y ~ N(tanh(y), 0.5^2)."""
     n = len(y)
-    gamma = np.random.gamma(2.0, 0.3, n)
-    return gamma + np.tanh(y)
+    mean = np.tanh(y)
+    std = 0.5
+    return np.random.normal(mean, std, n)
 
 def sample_joint(n):
     """Sample (x, y) from joint."""
@@ -118,14 +119,14 @@ def euler_integrate(vel_net, z0, y, n_steps=10):
 # Training
 # ============================================================================
 
-def train(n_epochs=500, batch_size=256, lr=1e-3, lam=0.5, n_steps=10, disc_updates=5):
+def train(n_epochs=200, batch_size=128, lr=1e-3, lam=0.5, n_steps=10, disc_updates=3):
     """
     Train conditional OT-flow.
 
     Key: y comes from data marginal. At test time, sample y ~ p(y) directly.
     """
     # Generate training data
-    n_train = 10000
+    n_train = 4000
     x_np, y_np = sample_joint(n_train)
     x_train = torch.FloatTensor(x_np).unsqueeze(1).to(device)
     y_train = torch.FloatTensor(y_np).unsqueeze(1).to(device)
@@ -291,17 +292,17 @@ def evaluate(vel_net):
 
 if __name__ == "__main__":
     print("="*60)
-    print("Conditional OT-Flow: 1D Gamma Example")
-    print("y ~ Uniform(-3, 3), x|y ~ Gamma(2, 0.3) + tanh(y)")
+    print("Conditional OT-Flow: 1D Gaussian Example")
+    print("y ~ Uniform(-3, 3), x|y ~ N(tanh(y), 0.5²)")
     print("="*60)
 
     vel_net, disc, history = train(
-        n_epochs=500,
-        batch_size=256,
+        n_epochs=200,
+        batch_size=128,
         lr=1e-3,
-        lam=0.5,
+        lam=0.1,
         n_steps=10,
-        disc_updates=5
+        disc_updates=3
     )
 
     print("\nGenerating evaluation plots...")
