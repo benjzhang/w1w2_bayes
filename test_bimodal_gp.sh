@@ -28,10 +28,10 @@ python -c "import torch; assert torch.cuda.is_available(); print(f'GPU: {torch.c
 
 export PYTHONUNBUFFERED=1
 
-echo "=== Bimodal Quadratic with Gradient Penalty (5000 iters) ==="
+echo "=== Bimodal Quadratic with Gradient Penalty (20000 iters) ==="
 python -u run_experiment.py \
     --problem bimodal_quadratic \
-    --n-iters 5000 \
+    --n-iters 20000 \
     --batch-size 256 \
     --gp-lambda 10.0 \
     --quad-features \
@@ -39,7 +39,7 @@ python -u run_experiment.py \
     --vel-layers 4 \
     --vel-hidden 256 \
     --device cuda \
-    --output-dir results/bimodal_gp
+    --output-dir results/bimodal_quadratic
 
 echo ""
 echo "=== Done ==="

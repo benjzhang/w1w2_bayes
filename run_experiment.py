@@ -154,8 +154,8 @@ def main():
 
     print(f"\nRun ID: {run_id}")
 
-    # Setup directories
-    output_dir = Path(args.output_dir) / problem.name
+    # Setup directories — use output_dir directly (user can organize as they wish)
+    output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     checkpoint_dir = args.checkpoint_dir
