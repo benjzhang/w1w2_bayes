@@ -58,7 +58,8 @@ class CircleProblem(BaseProblem):
         valid = np.abs(grid) < r
         pdf[valid] = 1.0 / np.sqrt(r**2 - grid[valid]**2)
         # Normalize
-        Z = np.trapz(pdf, grid)
+        _trapz = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
+        Z = _trapz(pdf, grid)
         return pdf / Z if Z > 0 else pdf
 
     def plot_true_posterior(self, ax, y_obs: float, **kwargs):

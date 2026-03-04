@@ -38,3 +38,8 @@ Thumbs.db
 *.err
 *.out
 slurm-*.out
+logs/
+
+# Experiment outputs
+experiments/
+results/

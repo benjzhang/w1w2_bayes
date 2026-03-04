@@ -60,7 +60,8 @@ class TestLinearProblem:
         assert len(pdf) == len(grid)
         assert np.all(pdf >= 0)
         # Should integrate to approximately 1
-        integral = np.trapz(pdf, grid)
+        _trapz = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
+        integral = _trapz(pdf, grid)
         np.testing.assert_allclose(integral, 1.0, atol=0.01)
 
     def test_default_hyperparams(self, problem):

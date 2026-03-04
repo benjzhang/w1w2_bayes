@@ -4,11 +4,11 @@ Run conditional flow experiments on inverse problems.
 
 Usage:
     python run_experiment.py --problem linear
-    python run_experiment.py --problem quadratic --epochs 500 --lip-scale 10
+    python run_experiment.py --problem quadratic --n-iters 10000 --lip-scale 10
     python run_experiment.py --problem circle --lam 0.05
 
     # Resume from checkpoint
-    python run_experiment.py --problem quadratic --resume checkpoints/quadratic/checkpoint_epoch100.pt
+    python run_experiment.py --problem quadratic --resume checkpoints/quadratic/checkpoint_iter5000.pt
 """
 
 import argparse
@@ -35,7 +35,7 @@ def parse_args():
     )
 
     # Training hyperparameters
-    parser.add_argument('--epochs', type=int, default=None, help='Number of epochs (default: problem default)')
+    parser.add_argument('--n-iters', type=int, default=None, help='Number of training iterations (default: problem default)')
     parser.add_argument('--batch-size', type=int, default=256, help='Batch size')
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--lam', type=float, default=None, help='KE regularization weight (default: problem default)')
@@ -48,13 +48,15 @@ def parse_args():
     parser.add_argument('--disc-hidden', type=int, default=128, help='Discriminator hidden width')
     parser.add_argument('--lip-scale', type=float, default=None, help='Lipschitz scale')
     parser.add_argument('--quad-features', action='store_true', help='Use quadratic features in discriminator')
+    parser.add_argument('--gp-lambda', type=float, default=0.0,
+                        help='One-sided gradient penalty coefficient (0 = use spectral norm instead)')
 
     # Data
     parser.add_argument('--n-train', type=int, default=10000, help='Number of training samples')
 
     # Checkpointing
     parser.add_argument('--checkpoint-dir', type=str, default=None, help='Directory for checkpoints')
-    parser.add_argument('--checkpoint-every', type=int, default=50, help='Checkpoint every N epochs')
+    parser.add_argument('--checkpoint-every', type=int, default=500, help='Checkpoint every N iterations')
     parser.add_argument('--resume', type=str, default=None, help='Resume from checkpoint')
 
     # Output
@@ -71,17 +73,22 @@ def parse_args():
     return parser.parse_args()
 
 
-def make_run_id(problem_name: str, epochs: int, lam: float, lip_scale: float,
+def make_run_id(n_iters: int, lam: float, lip_scale: float,
                 vel_layers: int, vel_hidden: int, n_steps: int,
-                quad_features: bool) -> str:
+                quad_features: bool, gp_lambda: float = 0.0) -> str:
     """Create a descriptive run ID from hyperparameters."""
     parts = [
-        f"ep{epochs}",
+        f"it{n_iters}",
         f"lam{lam}",
-        f"lip{lip_scale}",
+    ]
+    if gp_lambda > 0:
+        parts.append(f"gp{gp_lambda}")
+    else:
+        parts.append(f"lip{lip_scale}")
+    parts.extend([
         f"v{vel_layers}x{vel_hidden}",
         f"st{n_steps}",
-    ]
+    ])
     if quad_features:
         parts.append("quad")
     return "_".join(parts)
@@ -110,7 +117,7 @@ def main():
     defaults = problem.default_hyperparams()
 
     # Merge with CLI args
-    n_epochs = args.epochs or defaults.get('n_epochs', 300)
+    n_iters = args.n_iters or defaults.get('n_iters', defaults.get('n_epochs', 300) * 39)
     lam = args.lam if args.lam is not None else defaults.get('lam', 0.01)
     n_steps = args.n_steps or defaults.get('n_steps', 40)
     vel_hidden = args.vel_hidden or defaults.get('vel_hidden', 256)
@@ -123,16 +130,18 @@ def main():
         run_id = args.run_name
     else:
         run_id = make_run_id(
-            problem.name, n_epochs, lam, lip_scale,
-            vel_layers, vel_hidden, n_steps, use_quad_features
+            n_iters, lam, lip_scale,
+            vel_layers, vel_hidden, n_steps, use_quad_features,
+            gp_lambda=args.gp_lambda
         )
 
     run_config = {
         'run_id': run_id,
         'problem': problem.name,
-        'epochs': n_epochs,
+        'n_iters': n_iters,
         'lam': lam,
         'lip_scale': lip_scale,
+        'gp_lambda': args.gp_lambda,
         'vel_layers': vel_layers,
         'vel_hidden': vel_hidden,
         'n_steps': n_steps,
@@ -168,7 +177,10 @@ def main():
     else:
         print(f"\nCreating W1W2 Flow:")
         print(f"  VelocityNet: {vel_layers} layers × {vel_hidden} hidden")
-        print(f"  Discriminator: Lip={lip_scale}, quad_features={use_quad_features}")
+        if args.gp_lambda > 0:
+            print(f"  Discriminator: GP λ_gp={args.gp_lambda}, quad_features={use_quad_features}")
+        else:
+            print(f"  Discriminator: Lip={lip_scale}, quad_features={use_quad_features}")
         print(f"  λ={lam}, n_steps={n_steps}")
 
         flow = W1W2Flow(
@@ -179,22 +191,23 @@ def main():
             disc_hidden=args.disc_hidden,
             lip_scale=lip_scale,
             use_quadratic_features=use_quad_features,
+            gp_lambda=args.gp_lambda,
             device=device
         )
 
     # Training callback for intermediate evaluation
-    def eval_callback(epoch, metrics):
-        if epoch % 100 == 0:
+    def eval_callback(it, metrics):
+        if it % 1000 == 0:
             results = evaluate_flow(flow.vel_net, problem, n_samples=1000, n_steps=n_steps, device=device)
             mean_dist = np.mean(results['mean_distances'])
-            print(f"  [Eval @ epoch {epoch}] mean_dist={mean_dist:.4f}")
+            print(f"  [Eval @ iter {it}] mean_dist={mean_dist:.4f}")
 
     # Train
-    print(f"\nTraining for {n_epochs} epochs...")
+    print(f"\nTraining for {n_iters} iterations...")
     history = flow.train(
         theta_train,
         y_train,
-        n_epochs=n_epochs,
+        n_iters=n_iters,
         batch_size=args.batch_size,
         lr=args.lr,
         lam=lam,

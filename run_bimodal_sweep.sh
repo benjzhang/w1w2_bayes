@@ -1,11 +1,11 @@
 #!/bin/bash
 #
-# Quadratic problem: sweep over λ and Lip scale
-# Finds best hyperparameters for the parabola constraint
+# Bimodal quadratic problem: sweep over λ and Lip scale
+# Two parabola branches with offset=2.0, mix_prob=0.5
 #
-# Usage: sbatch run_quadratic_sweep.sh
+# Usage: sbatch run_bimodal_sweep.sh
 #
-#SBATCH --job-name=quad_sweep
+#SBATCH --job-name=bimodal_sweep
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
 #SBATCH --time=24:00:00
@@ -39,10 +39,10 @@ lam_values=("0.001" "0.005" "0.01" "0.05")
 lip_values=("5.0" "10.0" "20.0")
 epochs=300
 
-output_dir="experiments/quadratic_sweep_$(date +%Y%m%d_%H%M%S)"
+output_dir="experiments/bimodal_sweep_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$output_dir/logs"
 
-echo "Quadratic problem hyperparameter sweep"
+echo "Bimodal quadratic hyperparameter sweep"
 echo "Output: $output_dir"
 echo ""
 
@@ -53,7 +53,7 @@ for lam in "${lam_values[@]}"; do
         echo "[$(date +%H:%M:%S)] Running: λ=$lam, Lip=$lip"
 
         python run_experiment.py \
-            --problem quadratic \
+            --problem bimodal_quadratic \
             --epochs "$epochs" \
             --lam "$lam" \
             --lip-scale "$lip" \

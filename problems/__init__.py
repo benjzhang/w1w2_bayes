@@ -4,14 +4,17 @@ from .base import BaseProblem
 from .linear import LinearProblem
 from .quadratic import QuadraticProblem
 from .circle import CircleProblem
+from .bimodal_quadratic import BimodalQuadraticProblem
 
-__all__ = ['BaseProblem', 'LinearProblem', 'QuadraticProblem', 'CircleProblem']
+__all__ = ['BaseProblem', 'LinearProblem', 'QuadraticProblem', 'CircleProblem',
+           'BimodalQuadraticProblem']
 
 # Registry for easy access by name
 PROBLEMS = {
     'linear': LinearProblem,
     'quadratic': QuadraticProblem,
     'circle': CircleProblem,
+    'bimodal_quadratic': BimodalQuadraticProblem,
 }
 
 def get_problem(name: str) -> BaseProblem:

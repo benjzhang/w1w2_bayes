@@ -45,6 +45,7 @@ class W1W2Flow(BaseFlow):
         disc_layers: int = 3,
         lip_scale: float = 10.0,
         use_quadratic_features: bool = False,
+        gp_lambda: float = 0.0,
         device: Optional[torch.device] = None
     ):
         """Initialize W1W2 Flow.
@@ -58,16 +59,23 @@ class W1W2Flow(BaseFlow):
             disc_layers: Number of layers in discriminator
             lip_scale: Lipschitz constant scale for discriminator
             use_quadratic_features: Add quadratic features to discriminator
+            gp_lambda: One-sided gradient penalty coefficient.
+                When > 0, replaces spectral norm with penalty
+                λ * E[max(0, ||∇φ||² - 1)].
             device: Device to use (defaults to CUDA if available)
         """
         self._theta_dim = theta_dim
         self._y_dim = y_dim
         self.lip_scale = lip_scale
         self.use_quadratic_features = use_quadratic_features
+        self.gp_lambda = gp_lambda
 
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = device
+
+        # When using gradient penalty, disable spectral norm
+        use_spectral_norm = (gp_lambda == 0.0)
 
         # Networks
         self.vel_net = VelocityNet(
@@ -85,6 +93,7 @@ class W1W2Flow(BaseFlow):
             n_layers=disc_layers,
             lip_scale=lip_scale,
             use_quadratic_features=use_quadratic_features,
+            use_spectral_norm=use_spectral_norm,
             activation='silu'
         ).to(device)
 
@@ -98,6 +107,7 @@ class W1W2Flow(BaseFlow):
             'disc_layers': disc_layers,
             'lip_scale': lip_scale,
             'use_quadratic_features': use_quadratic_features,
+            'gp_lambda': gp_lambda,
         }
 
     @property
@@ -108,18 +118,46 @@ class W1W2Flow(BaseFlow):
     def y_dim(self) -> int:
         return self._y_dim
 
+    def _gradient_penalty(
+        self,
+        theta_real: torch.Tensor,
+        theta_gen: torch.Tensor,
+        y: torch.Tensor
+    ) -> torch.Tensor:
+        """One-sided gradient penalty: E[max(0, ||∇_θ φ(θ̂, y)||² - 1)].
+
+        Evaluates on interpolated points θ̂ = ε·θ_real + (1-ε)·θ_gen.
+        """
+        bs = theta_real.shape[0]
+        eps = torch.rand(bs, 1, device=self.device)
+        theta_hat = (eps * theta_real + (1 - eps) * theta_gen).requires_grad_(True)
+
+        phi_hat = self.disc(theta_hat, y)
+
+        grad = torch.autograd.grad(
+            outputs=phi_hat,
+            inputs=theta_hat,
+            grad_outputs=torch.ones_like(phi_hat),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        grad_norm_sq = (grad ** 2).sum(dim=1)
+        penalty = torch.clamp(grad_norm_sq - 1.0, min=0.0).mean()
+        return penalty
+
     def train(
         self,
         theta_data: torch.Tensor,
         y_data: torch.Tensor,
-        n_epochs: int = 300,
+        n_iters: int = 5000,
         batch_size: int = 256,
         lr: float = 1e-3,
         lam: float = 0.01,
         n_steps: int = 40,
         disc_updates: int = 5,
         checkpoint_dir: Optional[str] = None,
-        checkpoint_every: int = 50,
+        checkpoint_every: int = 500,
         eval_callback: Optional[Callable[[int, Dict], None]] = None,
         verbose: bool = True
     ) -> Dict[str, Any]:
@@ -128,111 +166,121 @@ class W1W2Flow(BaseFlow):
         Args:
             theta_data: Training samples, shape (n, theta_dim)
             y_data: Conditioning values, shape (n, y_dim)
-            n_epochs: Number of training epochs
+            n_iters: Number of training iterations (velocity updates)
             batch_size: Batch size
             lr: Learning rate
             lam: Kinetic energy regularization weight
             n_steps: Number of ODE integration steps
             disc_updates: Number of discriminator updates per generator update
             checkpoint_dir: Directory to save checkpoints (None = no checkpoints)
-            checkpoint_every: Save checkpoint every N epochs
-            eval_callback: Optional callback(epoch, metrics) for intermediate evaluation
+            checkpoint_every: Save checkpoint every N iterations
+            eval_callback: Optional callback(iter, metrics) for intermediate evaluation
             verbose: Print progress
 
         Returns:
-            Training history dictionary with 'L_dual', 'KE' lists
+            Training history dictionary with 'L_dual', 'KE', 'iters' lists
         """
         # Move data to device
         theta_data = theta_data.to(self.device)
         y_data = y_data.to(self.device)
 
         dataset = TensorDataset(theta_data, y_data)
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
         opt_vel = optim.Adam(self.vel_net.parameters(), lr=lr)
         opt_disc = optim.Adam(self.disc.parameters(), lr=lr)
 
-        history = {'L_dual': [], 'KE': [], 'epochs': []}
+        history = {'L_dual': [], 'KE': [], 'iters': []}
 
         if checkpoint_dir:
             Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
 
         if verbose:
-            print(f"Training W1W2 Flow: {n_epochs} epochs, λ={lam}, "
-                  f"disc_updates={disc_updates}, Lip={self.lip_scale}")
+            constraint = f"GP λ_gp={self.gp_lambda}" if self.gp_lambda > 0 else f"Lip={self.lip_scale}"
+            print(f"Training W1W2 Flow: {n_iters} iters, λ={lam}, "
+                  f"disc_updates={disc_updates}, {constraint}")
 
-        for epoch in range(n_epochs):
-            epoch_dual, epoch_ke = [], []
+        # Infinite data iterator
+        def infinite_loader():
+            while True:
+                for batch in loader:
+                    yield batch
 
-            for theta_batch, y_batch in loader:
-                bs = theta_batch.shape[0]
-                z = torch.randn(bs, self._theta_dim, device=self.device)
+        data_iter = infinite_loader()
 
-                # --- Discriminator updates ---
-                for _ in range(disc_updates):
-                    traj = euler_integrate(self.vel_net, z, y_batch, n_steps)
-                    theta_gen = traj[-1].detach()
+        for it in range(1, n_iters + 1):
+            theta_batch, y_batch = next(data_iter)
+            bs = theta_batch.shape[0]
+            z = torch.randn(bs, self._theta_dim, device=self.device)
 
-                    phi_gen = self.disc(theta_gen, y_batch)
-                    phi_real = self.disc(theta_batch, y_batch)
-                    L_dual = phi_gen.mean() - torch.exp(phi_real - 1).mean()
-
-                    opt_disc.zero_grad()
-                    (-L_dual).backward()
-                    opt_disc.step()
-
-                # --- Velocity update ---
+            # --- Discriminator updates ---
+            for _ in range(disc_updates):
                 traj = euler_integrate(self.vel_net, z, y_batch, n_steps)
-                theta_gen = traj[-1]
+                theta_gen = traj[-1].detach()
 
                 phi_gen = self.disc(theta_gen, y_batch)
                 phi_real = self.disc(theta_batch, y_batch)
                 L_dual = phi_gen.mean() - torch.exp(phi_real - 1).mean()
 
-                # Kinetic energy
-                KE = 0.0
-                dt = 1.0 / n_steps
-                for i, theta_t in enumerate(traj[:-1]):
-                    t = torch.full((theta_t.shape[0], 1), i * dt, device=self.device)
-                    v = self.vel_net(t, theta_t, y_batch)
-                    KE += 0.5 * (v ** 2).sum(dim=1).mean() * dt
+                disc_loss = -L_dual
+                if self.gp_lambda > 0:
+                    gp = self._gradient_penalty(theta_batch, theta_gen, y_batch)
+                    disc_loss = disc_loss + self.gp_lambda * gp
 
-                loss = L_dual + lam * KE
-                opt_vel.zero_grad()
-                loss.backward()
-                opt_vel.step()
+                opt_disc.zero_grad()
+                disc_loss.backward()
+                opt_disc.step()
 
-                epoch_dual.append(L_dual.item())
-                epoch_ke.append(KE.item())
+            # --- Velocity update ---
+            traj = euler_integrate(self.vel_net, z, y_batch, n_steps)
+            theta_gen = traj[-1]
+
+            phi_gen = self.disc(theta_gen, y_batch)
+            phi_real = self.disc(theta_batch, y_batch)
+            L_dual = phi_gen.mean() - torch.exp(phi_real - 1).mean()
+
+            # Kinetic energy
+            KE = 0.0
+            dt = 1.0 / n_steps
+            for i, theta_t in enumerate(traj[:-1]):
+                t = torch.full((theta_t.shape[0], 1), i * dt, device=self.device)
+                v = self.vel_net(t, theta_t, y_batch)
+                KE += 0.5 * (v ** 2).sum(dim=1).mean() * dt
+
+            loss = L_dual + lam * KE
+            opt_vel.zero_grad()
+            loss.backward()
+            opt_vel.step()
 
             # Record history
-            history['L_dual'].append(np.mean(epoch_dual))
-            history['KE'].append(np.mean(epoch_ke))
-            history['epochs'].append(epoch + 1)
+            history['L_dual'].append(L_dual.item())
+            history['KE'].append(KE.item())
+            history['iters'].append(it)
 
             # Checkpoint
-            if checkpoint_dir and (epoch + 1) % checkpoint_every == 0:
+            if checkpoint_dir and it % checkpoint_every == 0:
                 self._save_checkpoint(
-                    Path(checkpoint_dir) / f"checkpoint_epoch{epoch+1}.pt",
-                    epoch + 1,
+                    Path(checkpoint_dir) / f"checkpoint_iter{it}.pt",
+                    it,
                     history
                 )
                 if verbose:
-                    print(f"  [Checkpoint saved: epoch {epoch+1}]")
+                    print(f"  [Checkpoint saved: iter {it}]")
 
             # Evaluation callback
             if eval_callback:
-                metrics = {
-                    'epoch': epoch + 1,
-                    'L_dual': history['L_dual'][-1],
-                    'KE': history['KE'][-1],
-                }
-                eval_callback(epoch + 1, metrics)
+                eval_callback(it, {
+                    'iter': it,
+                    'L_dual': L_dual.item(),
+                    'KE': KE.item(),
+                })
 
             # Progress
-            if verbose and (epoch + 1) % 50 == 0:
-                print(f"[{epoch+1}/{n_epochs}] L_dual={history['L_dual'][-1]:.4f}, "
-                      f"KE={history['KE'][-1]:.4f}")
+            if verbose and it % 500 == 0:
+                recent_dual = np.mean(history['L_dual'][-100:])
+                recent_ke = np.mean(history['KE'][-100:])
+                print(f"[{it}/{n_iters}] L_dual={recent_dual:.4f}, "
+                      f"KE={recent_ke:.4f}")
 
         return history
 
@@ -346,6 +394,7 @@ class W1W2Flow(BaseFlow):
             disc_layers=hparams.get('disc_layers', 3),
             lip_scale=hparams.get('lip_scale', 10.0),
             use_quadratic_features=hparams.get('use_quadratic_features', False),
+            gp_lambda=hparams.get('gp_lambda', 0.0),
             device=device
         )
 

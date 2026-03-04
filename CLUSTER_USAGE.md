@@ -3,127 +3,111 @@
 ## Quick Start
 
 ```bash
-# Single run
-python run_experiment.py --problem quadratic --epochs 300 --device cuda
+# Single GPU test (submits to SLURM)
+sbatch test_gpu.sh
 
-# Run in background (keeps running after logout)
-nohup bash run_quadratic_sweep.sh &
+# Quadratic hyperparameter sweep (12 combos, ~12-24 hours)
+sbatch run_quadratic_sweep.sh
 
-# Or with screen/tmux
-screen -S w1w2_sweep
-bash run_quadratic_sweep.sh
-# Ctrl+A, D to detach
+# Custom sweep (edit grids first)
+sbatch sweep_example.sh
+
+# Check your jobs
+squeue -u $USER
 ```
 
-## Example Sweep Scripts
+## Sweep Scripts
+
+### `run_quadratic_sweep.sh`
+Focused sweep for quadratic problem with best-known architecture (4x256 network, 40 steps).
+
+Sweeps over:
+- lambda: 0.001, 0.005, 0.01, 0.05
+- Lip scale: 5.0, 10.0, 20.0
+- 12 combinations total, 300 epochs each
+
+Submit:
+```bash
+sbatch run_quadratic_sweep.sh
+```
 
 ### `sweep_example.sh`
-General template for parameter sweeps. Edit the hyperparameter arrays:
+General template for parameter sweeps. Edit the hyperparameter section at the top:
 ```bash
 problems=("quadratic")
 lam_values=("0.001" "0.01" "0.05")
 lip_values=("5.0" "10.0" "20.0")
+epochs=500
 ```
 
-Run:
+Submit:
 ```bash
-bash sweep_example.sh
+sbatch sweep_example.sh
 ```
 
-Outputs:
-- `experiments/sweep_YYYYMMDD_HHMMSS/`
-  - `quadratic/` - models and plots
-  - `logs/` - stdout/stderr for each run
-
-### `run_quadratic_sweep.sh`
-Focused sweep for quadratic problem with best-known architecture (4×256 network, 40 steps).
-
-Run:
+### `test_gpu.sh`
+Quick sanity check — runs linear problem for 10 epochs to verify GPU works.
 ```bash
-bash run_quadratic_sweep.sh
+sbatch test_gpu.sh
 ```
 
-Find best run:
+## Monitoring
+
 ```bash
-grep 'Mean distance' experiments/quadratic_sweep_*/logs/*.out | sort -t':' -k3 -n | head -5
-```
+# Check job status
+squeue -u $USER
 
-## Cluster-Specific Tips
+# Watch SLURM output in real time
+tail -f logs/slurm/quad_sweep_<JOBID>.out
 
-### GPU Selection
-```bash
-export CUDA_VISIBLE_DEVICES=0  # Use GPU 0
-python run_experiment.py --problem quadratic --device cuda
-```
+# Watch per-run logs (inside the experiment directory)
+tail -f experiments/quadratic_sweep_*/logs/lam0.01_lip10.0.out
 
-### Background Running
-```bash
-# nohup (simple)
-nohup bash run_quadratic_sweep.sh > sweep.log 2>&1 &
-tail -f sweep.log  # Monitor progress
-
-# screen (recommended)
-screen -S experiment
-bash run_quadratic_sweep.sh
-# Ctrl+A, D to detach
-# screen -r experiment  # Reattach later
-
-# tmux
-tmux new -s experiment
-bash run_quadratic_sweep.sh
-# Ctrl+B, D to detach
-```
-
-### Monitoring Progress
-```bash
-# Watch log file
-tail -f experiments/*/logs/lam0.01_lip10.0.out
-
-# Check running jobs
-ps aux | grep run_experiment
-
-# GPU usage
-nvidia-smi -l 1
+# Cancel a job
+scancel <JOBID>
 ```
 
 ## Output Structure
 
-After a sweep, you'll have:
+SLURM logs go to `logs/slurm/`. Experiment results go to `experiments/`:
 ```
+logs/slurm/
+  quad_sweep_12345.out          # SLURM stdout
+  quad_sweep_12345.err          # SLURM stderr
+
 experiments/quadratic_sweep_20260303_123456/
-├── logs/                           # Stdout logs
-│   ├── lam0.001_lip5.0.out
-│   ├── lam0.001_lip10.0.out
-│   └── ...
-└── quadratic/                      # Results
-    ├── model_ep300_lam0.001_lip5.0_v4x256_st40_quad.pt
-    ├── results_ep300_lam0.001_lip5.0_v4x256_st40_quad.png
-    └── checkpoints/
-        └── ep300_lam0.001_lip5.0_v4x256_st40_quad/
+  logs/                         # Per-run stdout logs
+    lam0.001_lip5.0.out
+    lam0.001_lip10.0.out
+    ...
+  quadratic/                    # Results
+    model_ep300_lam0.001_lip5.0_v4x256_st40_quad.pt
+    results_ep300_lam0.001_lip5.0_v4x256_st40_quad.png
+    checkpoints/
+      ep300_lam0.001_lip5.0_v4x256_st40_quad/
 ```
 
 ## Finding Best Hyperparameters
 
 ```bash
-# Extract mean distances from all logs
+# Extract mean distances from all logs in a sweep
 cd experiments/quadratic_sweep_YYYYMMDD_HHMMSS/logs
 for f in *.out; do
     echo -n "$f: "
     grep "mean_dist" "$f" | tail -4 | awk '{sum+=$3; n++} END {print sum/n}'
 done | sort -t':' -k2 -n | head -5
-
-# Or use this one-liner
-grep -h "y=.*mean_dist" *.out | \
-    awk '{sum+=$3; n++} END {print sum/n}' | \
-    paste <(ls *.out) - | \
-    sort -k2 -n | head -5
 ```
 
 ## Common Workflows
 
-### Test run (fast)
+### Single run on GPU
 ```bash
-python run_experiment.py --problem linear --epochs 10 --device cuda
+# Wrap in a SLURM interactive session
+srun --partition=gpu --gres=gpu:1 --mem=8G --time=02:00:00 --pty bash
+module load conda/latest
+conda activate /work/bjzhang_umass_edu/.conda/envs/w1w2_bayes
+cd /work/pi_markos_umass_edu/bjzhang_umass_edu/w1w2_bayes
+python run_experiment.py --problem quadratic --epochs 300 --device cuda
 ```
 
 ### Full training

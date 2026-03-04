@@ -228,7 +228,9 @@ def plot_results(
     # Hyperparameters section
     text += "Hyperparameters:\n"
     text += "-" * 32 + "\n"
-    if 'epochs' in run_config:
+    if 'n_iters' in run_config:
+        text += f"  iters: {run_config['n_iters']}\n"
+    elif 'epochs' in run_config:
         text += f"  epochs: {run_config['epochs']}\n"
     if 'lam' in run_config:
         text += f"  λ (KE): {run_config['lam']}\n"

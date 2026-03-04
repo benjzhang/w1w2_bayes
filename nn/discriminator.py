@@ -20,6 +20,8 @@ class Discriminator(nn.Module):
         lip_scale: Lipschitz constant scale (multiplies output)
         use_quadratic_features: Add θ² and cross-product features
             (useful for nonlinear constraints like parabolas)
+        use_spectral_norm: Apply spectral normalization to layers.
+            Set False when using gradient penalty instead.
         activation: Activation function
     """
 
@@ -31,6 +33,7 @@ class Discriminator(nn.Module):
         n_layers: int = 3,
         lip_scale: float = 1.0,
         use_quadratic_features: bool = False,
+        use_spectral_norm: bool = True,
         activation: str = 'silu'
     ):
         super().__init__()
@@ -58,17 +61,21 @@ class Discriminator(nn.Module):
         else:
             raise ValueError(f"Unknown activation: {activation}")
 
-        # Build network with spectral normalization
+        # Optionally wrap layers with spectral normalization
+        def maybe_sn(layer):
+            return nn.utils.spectral_norm(layer) if use_spectral_norm else layer
+
+        # Build network
         layers = [
-            nn.utils.spectral_norm(nn.Linear(input_dim, hidden)),
+            maybe_sn(nn.Linear(input_dim, hidden)),
             act_fn()
         ]
         for _ in range(n_layers - 2):
             layers.extend([
-                nn.utils.spectral_norm(nn.Linear(hidden, hidden)),
+                maybe_sn(nn.Linear(hidden, hidden)),
                 act_fn()
             ])
-        layers.append(nn.utils.spectral_norm(nn.Linear(hidden, 1)))
+        layers.append(maybe_sn(nn.Linear(hidden, 1)))
 
         self.net = nn.Sequential(*layers)
 

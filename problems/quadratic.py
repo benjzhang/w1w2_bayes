@@ -47,8 +47,9 @@ class QuadraticProblem(BaseProblem):
         if dim != 0:
             return None
         log_p = -grid**4/2 + (y_obs - 0.5)*grid**2 - y_obs**2/2
+        _trapz = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
         p = np.exp(log_p - log_p.max())
-        Z = np.trapz(p, grid)
+        Z = _trapz(p, grid)
         return p / Z if Z > 0 else p
 
     def plot_true_posterior(self, ax, y_obs: float, **kwargs):
