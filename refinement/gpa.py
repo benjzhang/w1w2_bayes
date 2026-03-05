@@ -129,6 +129,14 @@ def gpa_refine(
     if disc is not None:
         disc = copy.deepcopy(disc).to(device)
         disc.lip_scale = 1.0
+        # Strip spectral norm hooks if using gradient penalty
+        if gp_weight > 0:
+            for name, module in list(disc.named_modules()):
+                if isinstance(module, nn.Linear):
+                    try:
+                        nn.utils.remove_spectral_norm(module)
+                    except ValueError:
+                        pass  # no spectral norm on this layer
     else:
         disc = GPADiscriminator(
             theta_dim=theta_dim, y_dim=y_dim,

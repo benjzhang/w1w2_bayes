@@ -153,7 +153,7 @@ def main():
 
     # Plot and summarize
     n_test = len(y_test_values)
-    fig, axes = plt.subplots(2, n_test, figsize=(4 * n_test, 8))
+    fig, axes = plt.subplots(3, n_test, figsize=(4 * n_test, 12))
 
     all_before_dists = []
     all_after_dists = []
@@ -168,6 +168,8 @@ def main():
         all_before_dists.append(dist_before.mean())
         all_after_dists.append(dist_after.mean())
 
+        # Row 0: Before GPA (2D scatter)
+        # Row 1: After GPA (2D scatter)
         for row, (samples, label, dist) in enumerate([
             (particles_before, 'Before GPA', dist_before),
             (particles_after, 'After GPA', dist_after),
@@ -182,9 +184,30 @@ def main():
             ax.legend(fontsize=8)
             ax.grid(True, alpha=0.3)
 
-    fig.suptitle(f'GPA Refinement: {problem.name} | K={args.K}, η={args.eta}, L={args.L}', fontsize=14)
+        # Row 2: θ₁ marginal histogram vs true PDF
+        ax = axes[2, i]
+        ax.hist(particles_before[:, 0], bins=50, density=True, alpha=0.4,
+                color='blue', label='Before')
+        ax.hist(particles_after[:, 0], bins=50, density=True, alpha=0.4,
+                color='green', label='After')
+        grid = np.linspace(-4, 4, 200)
+        true_pdf = problem.true_posterior_pdf(grid, y_val, dim=0)
+        if true_pdf is not None:
+            ax.plot(grid, true_pdf, 'r-', linewidth=2, label='True p(θ₁|y)')
+        ax.set_title(f'θ₁ marginal (y={y_val})')
+        ax.set_xlabel('θ₁')
+        ax.set_ylabel('Density')
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+    warmstart_label = 'warm-start' if not args.no_warmstart else 'fresh disc'
+    gp_label = f', GP={args.gp_weight}' if args.gp_weight > 0 else ', spec norm'
+    fig.suptitle(
+        f'GPA Refinement: {problem.name} | K={args.K}, η={args.eta}, L={args.L}, '
+        f'ds={args.disc_steps}, bs={args.batch_size}{gp_label}, {warmstart_label}',
+        fontsize=13)
     plt.tight_layout()
-    plt.subplots_adjust(top=0.93)
+    plt.subplots_adjust(top=0.95)
 
     warmstart_tag = 'fresh' if args.no_warmstart else 'warm'
     if args.from_prior:
