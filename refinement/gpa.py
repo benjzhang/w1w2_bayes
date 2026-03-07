@@ -14,11 +14,36 @@ This learns the conditional structure across all y values simultaneously.
 Based on: Gu et al., "Lipschitz-regularized generative particles algorithm"
 """
 
+import math
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import copy
 from typing import Optional, Dict
+
+
+class MollifiedReLU(nn.Module):
+    """Smooth C³ ReLU approximation with Lipschitz constant 1.
+
+    From Gu et al.: ReLU_s^eps(x) =
+        0                                          if x <= 0
+        x²/(4ε) + ε(cos(πx/ε) - 1)/(2π²)         if 0 < x < 2ε
+        x - ε                                      if x >= 2ε
+    """
+
+    def __init__(self, eps: float = 0.5):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        eps = self.eps
+        mask_neg = x <= 0
+        mask_mid = (x > 0) & (x < 2 * eps)
+        mask_pos = x >= 2 * eps
+        mid_val = x.pow(2) / (4 * eps) + eps * (torch.cos(math.pi * x / eps) - 1) / (2 * math.pi ** 2)
+        return torch.where(mask_neg, torch.zeros_like(x),
+               torch.where(mask_mid, mid_val, x - eps))
 
 
 def _spectral_norm_projection(layer: nn.Linear, target_norm: float):
@@ -43,17 +68,25 @@ def _project_disc_weights(disc: nn.Module, L: float):
 
 
 class GPADiscriminator(nn.Module):
-    """Discriminator for conditional GPA with hard spectral norm projection.
+    """Discriminator for conditional GPA.
 
-    Architecture follows GPA reference: SiLU activations, 4 layers.
+    Uses ReLU (Lip-1 compatible) for hard spectral norm projection,
+    or SiLU for gradient penalty mode.
     """
 
-    def __init__(self, theta_dim: int, y_dim: int, hidden: int = 32, n_layers: int = 4):
+    def __init__(self, theta_dim: int, y_dim: int, hidden: int = 32,
+                 n_layers: int = 4, activation: str = 'relu'):
         super().__init__()
         input_dim = theta_dim + y_dim
-        layers = [nn.Linear(input_dim, hidden), nn.SiLU()]
+        if activation == 'relu':
+            act_cls = nn.ReLU
+        elif activation == 'mollified_relu':
+            act_cls = lambda: MollifiedReLU(eps=0.5)
+        else:
+            act_cls = nn.SiLU
+        layers = [nn.Linear(input_dim, hidden), act_cls()]
         for _ in range(n_layers - 2):
-            layers.extend([nn.Linear(hidden, hidden), nn.SiLU()])
+            layers.extend([nn.Linear(hidden, hidden), act_cls()])
         layers.append(nn.Linear(hidden, 1))
         self.net = nn.Sequential(*layers)
 
@@ -76,23 +109,25 @@ def gpa_refine(
     L: float = 1.0,
     batch_size: int = 256,
     gp_weight: float = 0.0,
+    disc_hidden: int = 32,
+    disc_layers: int = 4,
+    formulation: str = 'LT',
+    activation: Optional[str] = None,
     device: Optional[torch.device] = None,
-    verbose: bool = True
+    verbose: bool = True,
+    eval_callback=None,
+    eval_every: int = 50,
+    snapshot_every: int = 0,
 ) -> Dict:
     """Refine particles using conditional Lipschitz-regularized GPA.
 
-    Disc training uses coupled samples at the same y:
-      sup_phi (1/N) sum_i [phi(particle_i, y_i) - exp(phi(theta_i, y_i) - 1)]
-
-    where (theta_i, y_i) ~ pi(theta, y) and particle_i ~ rho_T(theta|y_i).
-    The first n_coupled particles correspond 1-to-1 with joint samples
-    (same y values), ensuring proper conditioning.
-
-    Then updates ALL particles: theta_i -= eta * grad_theta phi(theta_i, y_i)
+    Supports three KL variational formulations:
+      LT:    E_P[phi] - E_Q[exp(phi - 1)]                    (nu = 0 fixed)
+      LT_nu: E_P[phi] - E_Q[exp(phi - nu - 1)] - nu          (nu optimized)
+      DV:    E_P[phi] - log E_Q[exp(phi)]                     (Donsker-Varadhan)
 
     Args:
-        particles: Initial particles, shape (N, theta_dim). First n_coupled
-            entries correspond to joint samples (same y values).
+        particles: Initial particles, shape (N, theta_dim).
         y_particles: Conditioning y for each particle, shape (N, y_dim).
         theta_data: Joint samples, shape (n_data, theta_dim).
         y_data: Joint samples, shape (n_data, y_dim).
@@ -104,6 +139,7 @@ def gpa_refine(
         disc_lr: Discriminator learning rate.
         L: Lipschitz constant.
         batch_size: Batch size for disc training.
+        formulation: 'LT', 'LT_nu', or 'DV'.
         device: Device.
         verbose: Print progress.
 
@@ -138,23 +174,44 @@ def gpa_refine(
                     except ValueError:
                         pass  # no spectral norm on this layer
     else:
+        # Auto-select activation if not specified
+        if activation is not None:
+            act = activation
+        else:
+            act = 'relu' if gp_weight == 0 else 'silu'
         disc = GPADiscriminator(
             theta_dim=theta_dim, y_dim=y_dim,
-            hidden=32, n_layers=4
+            hidden=disc_hidden, n_layers=disc_layers, activation=act
         ).to(device)
 
     if gp_weight == 0:
         _project_disc_weights(disc, L)
 
+    # Trainable nu for LT_nu formulation
+    nu = torch.tensor(0.0, device=device, requires_grad=(formulation == 'LT_nu'))
+
     if verbose:
         print(f"  GPA: {n_particles} particles ({n_coupled} coupled), "
-              f"{n_data} joint samples, L={L}")
+              f"{n_data} joint samples, L={L}, formulation={formulation}")
 
-    history = {'L_dual': [], 'grad_norm': [], 'step': []}
+    history = {'L_dual': [], 'grad_norm': [], 'step': [], 'eval': []}
+    snapshots = []
+    if snapshot_every > 0:
+        snapshots.append((0, particles.detach().cpu().clone()))
+
+    # Persistent optimizer across GPA steps (preserves Adam momentum/variance)
+    disc_params = list(disc.parameters())
+    if formulation == 'LT_nu':
+        disc_params.append(nu)
+    opt_disc = optim.Adam(disc_params, lr=disc_lr)
+
+    # Eval at step 0 (before any updates)
+    if eval_callback is not None:
+        eval_result = eval_callback(particles, 0)
+        history['eval'].append((0, eval_result))
 
     for k in range(K):
         # --- Train discriminator with coupled samples ---
-        opt_disc = optim.Adam(disc.parameters(), lr=disc_lr)
 
         for _ in range(disc_steps):
             # Sample SAME indices for both fake and real (coupled at same y)
@@ -170,8 +227,16 @@ def gpa_refine(
             phi_fake = disc(particles_batch, y_batch)
             phi_real = disc(theta_real, y_batch)
 
-            # KL variational: E_fake[phi] - E_real[exp(phi - 1)]
-            L_dual = phi_fake.mean() - torch.exp(phi_real - 1).mean()
+            # KL variational dual
+            if formulation == 'DV':
+                # Donsker-Varadhan: E_P[phi] - log E_Q[exp(phi)]
+                L_dual = phi_fake.mean() - torch.logsumexp(phi_real, dim=0).squeeze() + torch.log(torch.tensor(float(len(phi_real)), device=device))
+            elif formulation == 'LT_nu':
+                # LT with trainable nu: E_P[phi] - E_Q[exp(phi - nu - 1)] - nu
+                L_dual = phi_fake.mean() - torch.exp(phi_real - nu - 1).mean() - nu
+            else:
+                # LT (default): E_P[phi] - E_Q[exp(phi - 1)]
+                L_dual = phi_fake.mean() - torch.exp(phi_real - 1).mean()
             disc_loss = -L_dual
 
             # One-sided gradient penalty on interpolates
@@ -190,7 +255,7 @@ def gpa_refine(
             disc_loss.backward()
             opt_disc.step()
 
-            if gp_weight == 0:
+            if gp_weight == 0 and L > 0 and not np.isinf(L):
                 _project_disc_weights(disc, L)
 
         # --- Update particles along -grad phi ---
@@ -210,12 +275,23 @@ def gpa_refine(
         history['grad_norm'].append(grad_norm)
         history['step'].append(k)
 
-        if verbose and (k + 1) % 10 == 0:
-            print(f"  [GPA {k+1}/{K}] L_dual={L_dual.item():.4f}, "
-                  f"grad_norm={grad_norm:.4f}")
+        if snapshot_every > 0 and (k + 1) % snapshot_every == 0:
+            snapshots.append((k + 1, particles.detach().cpu().clone()))
 
-    return {
+        if eval_callback is not None and (k + 1) % eval_every == 0:
+            eval_result = eval_callback(particles, k + 1)
+            history['eval'].append((k + 1, eval_result))
+
+        if verbose and (k + 1) % 10 == 0:
+            nu_str = f", nu={nu.item():.4f}" if formulation == 'LT_nu' else ""
+            print(f"  [GPA {k+1}/{K}] L_dual={L_dual.item():.4f}, "
+                  f"grad_norm={grad_norm:.4f}{nu_str}")
+
+    result = {
         'particles': particles,
         'history': history,
         'disc': disc,
     }
+    if snapshot_every > 0:
+        result['snapshots'] = snapshots
+    return result

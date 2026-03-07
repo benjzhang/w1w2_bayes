@@ -18,6 +18,7 @@ import json
 
 from .base import BaseFlow
 from nn import VelocityNet, Discriminator
+from refinement.gpa import GPADiscriminator, _project_disc_weights
 from utils.integrators import euler_integrate, compute_kinetic_energy
 
 
@@ -74,9 +75,6 @@ class W1W2Flow(BaseFlow):
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = device
 
-        # When using gradient penalty, disable spectral norm
-        use_spectral_norm = (gp_lambda == 0.0)
-
         # Networks
         self.vel_net = VelocityNet(
             theta_dim=theta_dim,
@@ -86,15 +84,14 @@ class W1W2Flow(BaseFlow):
             activation='silu'
         ).to(device)
 
-        self.disc = Discriminator(
+        # Use same GPADiscriminator architecture for both flow training and GPA refinement
+        disc_act = 'silu' if gp_lambda > 0 else 'mollified_relu'
+        self.disc = GPADiscriminator(
             theta_dim=theta_dim,
             y_dim=y_dim,
             hidden=disc_hidden,
             n_layers=disc_layers,
-            lip_scale=lip_scale,
-            use_quadratic_features=use_quadratic_features,
-            use_spectral_norm=use_spectral_norm,
-            activation='silu'
+            activation=disc_act
         ).to(device)
 
         # Store hyperparameters for saving
@@ -230,6 +227,10 @@ class W1W2Flow(BaseFlow):
                 opt_disc.zero_grad()
                 disc_loss.backward()
                 opt_disc.step()
+
+                # Hard spectral norm projection (replaces PyTorch spectral_norm wrapper)
+                if self.gp_lambda == 0:
+                    _project_disc_weights(self.disc, self.lip_scale)
 
             # --- Velocity update ---
             traj = euler_integrate(self.vel_net, z, y_batch, n_steps)

@@ -43,7 +43,7 @@ logs/
 # Experiment outputs
 experiments/
 
-# Ignore results but keep figures
-results/**
-!results/**/
-!results/**/*.png
+# Results: ignore large binaries, keep PNGs and JSONs
+results/**/*.pt
+results/**/*.npz
+results/**/*.gif

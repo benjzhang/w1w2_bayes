@@ -46,6 +46,53 @@ def generate_posterior(
         return traj[-1].cpu().numpy()
 
 
+def compute_mmd_bandwidth(samples: np.ndarray) -> float:
+    """Compute median-heuristic bandwidth from a reference set of samples.
+
+    Use this once on true posterior samples, then pass the result to compute_mmd
+    so all comparisons use the same bandwidth.
+    """
+    from scipy.spatial.distance import cdist
+    dists = cdist(samples, samples, 'sqeuclidean')
+    median_dist = np.median(dists[dists > 0])
+    return np.sqrt(median_dist / 2)
+
+
+def compute_mmd(x: np.ndarray, y: np.ndarray, bandwidth: float = None) -> float:
+    """Compute MMD^2 between two sets of samples using Gaussian kernel.
+
+    Uses the unbiased U-statistic estimator.
+    If bandwidth is None, uses the median heuristic (WARNING: this makes values
+    incomparable across calls since bandwidth changes with sample distribution).
+    For comparable results, precompute bandwidth with compute_mmd_bandwidth().
+    """
+    from scipy.spatial.distance import cdist
+
+    if bandwidth is None:
+        xy = np.vstack([x, y])
+        dists = cdist(xy, xy, 'sqeuclidean')
+        median_dist = np.median(dists[dists > 0])
+        bandwidth = np.sqrt(median_dist / 2)
+
+    gamma = 1.0 / (2 * bandwidth**2)
+
+    xx = cdist(x, x, 'sqeuclidean')
+    yy = cdist(y, y, 'sqeuclidean')
+    xy = cdist(x, y, 'sqeuclidean')
+
+    n, m = len(x), len(y)
+
+    kxx = np.exp(-gamma * xx)
+    kyy = np.exp(-gamma * yy)
+    kxy = np.exp(-gamma * xy)
+
+    np.fill_diagonal(kxx, 0)
+    np.fill_diagonal(kyy, 0)
+
+    mmd2 = kxx.sum() / (n * (n - 1)) + kyy.sum() / (m * (m - 1)) - 2 * kxy.mean()
+    return float(mmd2)
+
+
 def evaluate_flow(
     vel_net,
     problem,
