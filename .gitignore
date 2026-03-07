@@ -46,4 +46,3 @@ experiments/
 # Results: ignore large binaries, keep PNGs and JSONs
 results/**/*.pt
 results/**/*.npz
-results/**/*.gif
