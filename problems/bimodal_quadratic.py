@@ -59,18 +59,21 @@ class BimodalQuadraticProblem(BaseProblem):
         y[use_shifted] -= self.offset
         return theta, y
 
-    def sample_true_posterior(self, y_obs: float, n_samples: int) -> np.ndarray:
-        """Sample from true posterior: mixture of two parabolas.
+    def sample_true_posterior(self, y_obs: float, n_samples: int,
+                              tol: float = 0.05) -> np.ndarray:
+        """Sample from true posterior by filtering joint samples near y_obs.
 
-        p(θ|y) = mix_prob * N(θ₁;0,1)δ(θ₂ - (y+offset-θ₁²))
-               + (1-mix_prob) * N(θ₁;0,1)δ(θ₂ - (y-θ₁²))
+        Draw (θ, y) from the joint and keep θ where |y - y_obs| < tol.
         """
-        theta1 = np.random.randn(n_samples)
-        use_shifted = np.random.rand(n_samples) < self.mix_prob
-        theta2 = np.where(use_shifted,
-                          y_obs + self.offset - theta1**2,
-                          y_obs - theta1**2)
-        return np.stack([theta1, theta2], axis=1)
+        collected = []
+        n_collected = 0
+        while n_collected < n_samples:
+            batch = max(n_samples * 20, 100000)
+            theta, y = self.sample_joint(batch)
+            mask = np.abs(y - y_obs) < tol
+            collected.append(theta[mask])
+            n_collected += mask.sum()
+        return np.concatenate(collected, axis=0)[:n_samples]
 
     def compute_distance(self, theta: np.ndarray, y_obs: float) -> np.ndarray:
         """Minimum vertical distance to either parabola branch."""

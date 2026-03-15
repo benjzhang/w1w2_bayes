@@ -1,0 +1,14 @@
+{
+  "name": "gpa_rkl",
+  "type": "flow+gpa",
+  "checkpoint": "results/mnist/sweep/rkl_gp_5k/model.pt",
+  "K": 5000,
+  "eta": 0.5,
+  "L": 1.0,
+  "fstar": "reverse_kl",
+  "lip_mode": "gp",
+  "gp_lambda": 0.1,
+  "mean_mse": 0.13959936127066613,
+  "mean_diversity": 0.22576477080583573,
+  "elapsed_s": 706.8696420192719
+}

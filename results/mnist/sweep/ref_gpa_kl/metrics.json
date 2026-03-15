@@ -1,0 +1,10 @@
+{
+  "name": "ref_gpa_kl",
+  "K": 5000,
+  "eta": 0.5,
+  "L": 1.0,
+  "fstar": "kl",
+  "lip_mode": "project",
+  "n_samples": 500,
+  "elapsed_s": 1193.478443145752
+}
