@@ -144,13 +144,16 @@ class ScoreBasedDiffusion:
 
         return history
 
-    def sample(self, y_val: float, n_samples: int, n_steps: int = 200) -> torch.Tensor:
+    def sample(self, y_val, n_samples: int, n_steps: int = 200) -> torch.Tensor:
         """Sample using the probability flow ODE (reverse-time)."""
         self.eps_net.eval()
         with torch.no_grad():
             # Start from pure noise at t=T
             theta = torch.randn(n_samples, self.theta_dim, device=self.device)
-            y = torch.full((n_samples, self.y_dim), y_val, device=self.device)
+            if isinstance(y_val, (int, float)):
+                y = torch.full((n_samples, self.y_dim), y_val, device=self.device)
+            else:
+                y = torch.FloatTensor(y_val).to(self.device).unsqueeze(0).expand(n_samples, -1)
 
             dt = self.T / n_steps
             for i in range(n_steps):

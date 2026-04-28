@@ -44,7 +44,7 @@ class TestW1W2Flow:
 
         history = flow.train(
             theta, y,
-            n_epochs=2,
+            n_iters=2,
             batch_size=50,
             n_steps=5,
             disc_updates=1,
@@ -60,7 +60,7 @@ class TestW1W2Flow:
         # Train briefly to change weights
         theta = torch.randn(50, 2)
         y = torch.randn(50, 1)
-        flow.train(theta, y, n_epochs=1, batch_size=50, n_steps=3, verbose=False)
+        flow.train(theta, y, n_iters=1, batch_size=50, n_steps=3, verbose=False)
 
         # Sample before save
         y_test = torch.tensor([0.5])
@@ -90,7 +90,7 @@ class TestW1W2Flow:
     def test_from_checkpoint(self, flow):
         theta = torch.randn(50, 2)
         y = torch.randn(50, 1)
-        flow.train(theta, y, n_epochs=1, batch_size=50, n_steps=3, verbose=False)
+        flow.train(theta, y, n_iters=1, batch_size=50, n_steps=3, verbose=False)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "checkpoint.pt"
@@ -115,7 +115,7 @@ class TestW1W2Flow:
         with tempfile.TemporaryDirectory() as tmpdir:
             flow.train(
                 theta, y,
-                n_epochs=3,
+                n_iters=3,
                 batch_size=50,
                 n_steps=3,
                 checkpoint_dir=tmpdir,
@@ -124,7 +124,7 @@ class TestW1W2Flow:
             )
 
             # Should have checkpoint at epoch 2
-            checkpoint_path = Path(tmpdir) / "checkpoint_epoch2.pt"
+            checkpoint_path = Path(tmpdir) / "checkpoint_iter2.pt"
             assert checkpoint_path.exists()
 
 
@@ -145,7 +145,7 @@ class TestW1W2FlowWithProblem:
         theta = torch.FloatTensor(theta_np)
         y = torch.FloatTensor(y_np).unsqueeze(1)
 
-        history = flow.train(theta, y, n_epochs=1, batch_size=50, n_steps=3, verbose=False)
+        history = flow.train(theta, y, n_iters=1, batch_size=50, n_steps=3, verbose=False)
         assert len(history['L_dual']) == 1
 
         samples = flow.sample(torch.tensor([0.0]), n_samples=50, n_steps=3)
@@ -166,5 +166,5 @@ class TestW1W2FlowWithProblem:
         theta = torch.FloatTensor(theta_np)
         y = torch.FloatTensor(y_np).unsqueeze(1)
 
-        history = flow.train(theta, y, n_epochs=1, batch_size=50, n_steps=3, verbose=False)
+        history = flow.train(theta, y, n_iters=1, batch_size=50, n_steps=3, verbose=False)
         assert len(history['L_dual']) == 1

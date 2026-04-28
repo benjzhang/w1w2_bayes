@@ -156,7 +156,8 @@ class W1W2Flow(BaseFlow):
         checkpoint_dir: Optional[str] = None,
         checkpoint_every: int = 500,
         eval_callback: Optional[Callable[[int, Dict], None]] = None,
-        verbose: bool = True
+        verbose: bool = True,
+        source_samples: Optional[torch.Tensor] = None
     ) -> Dict[str, Any]:
         """Train the W1W2 flow.
 
@@ -173,6 +174,9 @@ class W1W2Flow(BaseFlow):
             checkpoint_every: Save checkpoint every N iterations
             eval_callback: Optional callback(iter, metrics) for intermediate evaluation
             verbose: Print progress
+            source_samples: Optional source distribution samples, shape (n, theta_dim).
+                If provided, flow starts from these instead of N(0,I).
+                Must have same number of samples as theta_data.
 
         Returns:
             Training history dictionary with 'L_dual', 'KE', 'iters' lists
@@ -180,6 +184,8 @@ class W1W2Flow(BaseFlow):
         # Move data to device
         theta_data = theta_data.to(self.device)
         y_data = y_data.to(self.device)
+        if source_samples is not None:
+            source_samples = source_samples.to(self.device)
 
         dataset = TensorDataset(theta_data, y_data)
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
@@ -208,7 +214,11 @@ class W1W2Flow(BaseFlow):
         for it in range(1, n_iters + 1):
             theta_batch, y_batch = next(data_iter)
             bs = theta_batch.shape[0]
-            z = torch.randn(bs, self._theta_dim, device=self.device)
+            if source_samples is not None:
+                idx = torch.randint(0, source_samples.shape[0], (bs,))
+                z = source_samples[idx]
+            else:
+                z = torch.randn(bs, self._theta_dim, device=self.device)
 
             # --- Discriminator updates ---
             for _ in range(disc_updates):
@@ -289,7 +299,8 @@ class W1W2Flow(BaseFlow):
         self,
         y: torch.Tensor,
         n_samples: int,
-        n_steps: int = 40
+        n_steps: int = 40,
+        source_samples: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """Sample from p(θ|y).
 
@@ -297,13 +308,18 @@ class W1W2Flow(BaseFlow):
             y: Conditioning value, shape (y_dim,) or (batch, y_dim)
             n_samples: Number of samples
             n_steps: Integration steps
+            source_samples: Optional source samples to start from instead of N(0,I).
+                Shape (n_samples, theta_dim).
 
         Returns:
             Samples, shape (n_samples, theta_dim)
         """
         self.vel_net.eval()
         with torch.no_grad():
-            z = torch.randn(n_samples, self._theta_dim, device=self.device)
+            if source_samples is not None:
+                z = source_samples.to(self.device)
+            else:
+                z = torch.randn(n_samples, self._theta_dim, device=self.device)
 
             # Handle scalar y
             if y.dim() == 0 or (y.dim() == 1 and y.shape[0] == self._y_dim):
