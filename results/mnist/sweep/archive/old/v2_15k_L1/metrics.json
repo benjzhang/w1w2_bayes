@@ -1,0 +1,15 @@
+{
+  "name": "v2_15k_L1",
+  "type": "flow",
+  "arch_type": "mlp",
+  "hidden": 256,
+  "n_layers": 3,
+  "lam": 0.1,
+  "lip_scale": 1.0,
+  "lr_gen": 0.0001,
+  "lr_disc": 2e-05,
+  "mean_mse": 0.1497992157936096,
+  "mean_diversity": 0.2860571712255478,
+  "model_path": "results/mnist/sweep/v2_15k_L1/model.pt",
+  "elapsed_s": 28461.228553771973
+}

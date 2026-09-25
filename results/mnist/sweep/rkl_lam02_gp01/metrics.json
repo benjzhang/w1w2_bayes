@@ -1,0 +1,15 @@
+{
+  "name": "rkl_lam02_gp01",
+  "type": "flow",
+  "arch_type": "mlp",
+  "hidden": 512,
+  "n_layers": 4,
+  "lam": 0.2,
+  "lip_scale": 1.0,
+  "lr_gen": 0.0005,
+  "lr_disc": 0.0001,
+  "mean_mse": 0.09577329605817794,
+  "mean_diversity": 0.21651259660720826,
+  "model_path": "results/mnist/sweep/rkl_lam02_gp01/model.pt",
+  "elapsed_s": 1982.806637763977
+}

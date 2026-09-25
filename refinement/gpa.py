@@ -118,6 +118,9 @@ def gpa_refine(
     eval_callback=None,
     eval_every: int = 50,
     snapshot_every: int = 0,
+    normalize_grad: bool = False,
+    disc_optimizer: str = 'adam',
+    disc_reset_every: int = 0,
 ) -> Dict:
     """Refine particles using conditional Lipschitz-regularized GPA.
 
@@ -199,11 +202,14 @@ def gpa_refine(
     if snapshot_every > 0:
         snapshots.append((0, particles.detach().cpu().clone()))
 
-    # Persistent optimizer across GPA steps (preserves Adam momentum/variance)
+    # Persistent optimizer across GPA steps
     disc_params = list(disc.parameters())
     if formulation == 'LT_nu':
         disc_params.append(nu)
-    opt_disc = optim.Adam(disc_params, lr=disc_lr)
+    if disc_optimizer == 'sgd':
+        opt_disc = optim.SGD(disc_params, lr=disc_lr)
+    else:
+        opt_disc = optim.Adam(disc_params, lr=disc_lr)
 
     # Eval at step 0 (before any updates)
     if eval_callback is not None:
@@ -211,6 +217,13 @@ def gpa_refine(
         history['eval'].append((0, eval_result))
 
     for k in range(K):
+        # Reset optimizer state periodically (keep disc weights)
+        if disc_reset_every > 0 and k > 0 and k % disc_reset_every == 0:
+            if disc_optimizer == 'sgd':
+                opt_disc = optim.SGD(disc_params, lr=disc_lr)
+            else:
+                opt_disc = optim.Adam(disc_params, lr=disc_lr)
+
         # --- Train discriminator with coupled samples ---
 
         for _ in range(disc_steps):
@@ -268,6 +281,8 @@ def gpa_refine(
 
         with torch.no_grad():
             grad_norm = grad.norm(dim=1).mean().item()
+            if normalize_grad:
+                grad = grad / (grad.norm(dim=1, keepdim=True) + 1e-8)
             particles = particles - eta * grad
             particles = particles.detach()
 

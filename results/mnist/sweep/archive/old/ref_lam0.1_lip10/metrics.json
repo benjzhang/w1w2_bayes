@@ -1,0 +1,15 @@
+{
+  "name": "ref_lam0.1_lip10",
+  "type": "flow",
+  "arch_type": "mlp",
+  "hidden": 512,
+  "n_layers": 3,
+  "lam": 0.1,
+  "lip_scale": 10.0,
+  "lr_gen": 0.0005,
+  "lr_disc": 0.0001,
+  "mean_mse": 1.0600359678268432,
+  "mean_diversity": 0.982930201292038,
+  "model_path": "results/mnist/sweep/ref_lam0.1_lip10/model.pt",
+  "elapsed_s": 3645.7148792743683
+}

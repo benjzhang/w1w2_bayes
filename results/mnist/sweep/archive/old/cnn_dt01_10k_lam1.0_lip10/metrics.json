@@ -1,0 +1,15 @@
+{
+  "name": "cnn_dt01_10k_lam1.0_lip10",
+  "type": "flow",
+  "arch_type": "cnn",
+  "hidden": 512,
+  "n_layers": 4,
+  "lam": 1.0,
+  "lip_scale": 10.0,
+  "lr_gen": 0.0005,
+  "lr_disc": 0.0001,
+  "mean_mse": 0.16327157020568847,
+  "mean_diversity": 0.28579876124858855,
+  "model_path": "results/mnist/sweep/cnn_dt01_10k_lam1.0_lip10/model.pt",
+  "elapsed_s": 2381.5775966644287
+}

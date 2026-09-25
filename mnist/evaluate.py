@@ -167,6 +167,84 @@ def plot_completions(y_test, theta_samples_list, theta_true, save_path,
     print(f"Saved: {save_path}")
 
 
+def plot_flow_vs_gpa(y_test, theta_true, flow_samples_list, gpa_samples_list,
+                     save_path, flow_mse=None, gpa_mse=None, title=None,
+                     n_show=3):
+    """Plot flow vs GPA with paired columns showing 1-to-1 correspondence.
+
+    Layout per row: Original | Observed | Flow1→GPA1 | Flow2→GPA2 | ...
+    Each pair shares the same particle, shown before and after GPA refinement.
+    """
+    n_test = len(y_test)
+    # Columns: orig, obs, then n_show × (flow, gpa) interleaved
+    n_cols = 2 + 2 * n_show
+    fig, axes = plt.subplots(n_test, n_cols,
+                             figsize=(1.6 * n_cols, 1.8 * n_test))
+    if n_test == 1:
+        axes = axes[None, :]
+
+    for i in range(n_test):
+        y_i = y_test[i]
+        flow_i = flow_samples_list[i]
+        gpa_i = gpa_samples_list[i]
+
+        # Original
+        axes[i, 0].imshow(reconstruct_image(y_i, theta_true[i]),
+                          cmap='gray', vmin=0, vmax=1)
+        axes[i, 0].axis('off')
+
+        # Observed
+        axes[i, 1].imshow(reconstruct_image(y_i, np.zeros(392)),
+                          cmap='gray', vmin=0, vmax=1)
+        axes[i, 1].axis('off')
+
+        # Paired flow → GPA
+        for j in range(n_show):
+            cf = 2 + 2 * j      # flow column
+            cg = 2 + 2 * j + 1  # gpa column
+
+            if j < len(flow_i):
+                axes[i, cf].imshow(reconstruct_image(y_i, flow_i[j]),
+                                   cmap='gray', vmin=0, vmax=1)
+            axes[i, cf].axis('off')
+
+            if j < len(gpa_i):
+                axes[i, cg].imshow(reconstruct_image(y_i, gpa_i[j]),
+                                   cmap='gray', vmin=0, vmax=1)
+            axes[i, cg].axis('off')
+
+    # Column headers
+    axes[0, 0].set_title('Original', fontsize=8)
+    axes[0, 1].set_title('Observed', fontsize=8)
+    for j in range(n_show):
+        axes[0, 2 + 2*j].set_title(f'Flow {j+1}', fontsize=8, color='#2166ac')
+        axes[0, 2 + 2*j + 1].set_title(f'\u2192 GPA {j+1}', fontsize=8, color='#b2182b')
+
+    # Add thin vertical separators between pairs using lines in figure coords
+    for j in range(1, n_show):
+        # Position between previous GPA col and next Flow col
+        x = (axes[0, 2 + 2*j].get_position().x0 +
+             axes[0, 2 + 2*j - 1].get_position().x1) / 2
+        fig.add_artist(plt.Line2D([x, x], [0.02, 0.92],
+                                  transform=fig.transFigure,
+                                  color='#cccccc', linewidth=0.5))
+
+    suptitle = title or ''
+    if flow_mse is not None and gpa_mse is not None:
+        suptitle += f'  (Flow MSE={flow_mse:.4f} \u2192 GPA MSE={gpa_mse:.4f})'
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=11, fontweight='bold')
+
+    plt.tight_layout()
+    if suptitle:
+        plt.subplots_adjust(top=0.93)
+
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved: {save_path}")
+
+
 def plot_metrics_summary(all_metrics, save_path, title=None):
     """Plot a bar chart of MSE and diversity per test image.
 

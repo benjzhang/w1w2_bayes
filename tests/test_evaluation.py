@@ -22,7 +22,7 @@ class TestGeneratePosterior:
         # Minimal training
         theta = torch.randn(50, 2)
         y = torch.randn(50, 1)
-        flow.train(theta, y, n_epochs=1, batch_size=50, n_steps=3, verbose=False)
+        flow.train(theta, y, n_iters=1, batch_size=50, n_steps=3, verbose=False)
         return flow
 
     def test_output_shape(self, trained_flow):
@@ -64,7 +64,7 @@ class TestEvaluateFlow:
         )
         theta = torch.randn(50, 2)
         y = torch.randn(50, 1)
-        flow.train(theta, y, n_epochs=1, batch_size=50, n_steps=3, verbose=False)
+        flow.train(theta, y, n_iters=1, batch_size=50, n_steps=3, verbose=False)
         return flow, problem
 
     def test_returns_dict_with_expected_keys(self, setup):
@@ -109,7 +109,7 @@ class TestPlotResults:
         )
         theta = torch.randn(50, 2)
         y = torch.randn(50, 1)
-        history = flow.train(theta, y, n_epochs=1, batch_size=50, n_steps=3, verbose=False)
+        history = flow.train(theta, y, n_iters=1, batch_size=50, n_steps=3, verbose=False)
 
         import matplotlib
         matplotlib.use('Agg')  # Non-interactive backend
@@ -132,7 +132,7 @@ class TestPlotResults:
         )
         theta = torch.randn(50, 2)
         y = torch.randn(50, 1)
-        history = flow.train(theta, y, n_epochs=1, batch_size=50, n_steps=3, verbose=False)
+        history = flow.train(theta, y, n_iters=1, batch_size=50, n_steps=3, verbose=False)
 
         import matplotlib
         matplotlib.use('Agg')
@@ -159,7 +159,7 @@ class TestPlotResults:
         )
         theta = torch.randn(50, 2)
         y = torch.randn(50, 1)
-        history = flow.train(theta, y, n_epochs=1, batch_size=50, n_steps=3, verbose=False)
+        history = flow.train(theta, y, n_iters=1, batch_size=50, n_steps=3, verbose=False)
 
         import matplotlib
         matplotlib.use('Agg')

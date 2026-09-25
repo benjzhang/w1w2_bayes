@@ -70,7 +70,7 @@ class CircleProblem(BaseProblem):
                 linewidth=2, label=f'r={r:.2f}', **kwargs)
 
     def default_y_test_values(self) -> List[float]:
-        return [0.5, 1.0, 2.0, 4.0]
+        return [0.25, 0.5, 1.0, 2.0, 4.0]
 
     def default_hyperparams(self) -> dict:
         return {
