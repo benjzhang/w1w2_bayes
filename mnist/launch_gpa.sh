@@ -4,7 +4,7 @@
 # Usage: bash mnist/launch_gpa.sh
 
 set -e
-cd /work/pi_markos_umass_edu/bjzhang_umass_edu/w1w2_bayes
+cd /cache/home/bj394/w1w2_bayes
 mkdir -p logs
 
 SWEEP_DIR="results/mnist/sweep"
@@ -25,8 +25,7 @@ submit_gpa() {
 
     cat > ${SCRIPT_DIR}/${NAME}.sh << 'HEADER'
 #!/bin/bash
-#SBATCH --partition=gpu-preempt
-#SBATCH --constraint=l40s|a100|h100|a40|2080_ti
+#SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
 #SBATCH --mem=16G
 #SBATCH --time=4:00:00
@@ -39,14 +38,11 @@ HEADER
 
 set -e
 export PYTHONUNBUFFERED=1
-source /etc/profile.d/modules.sh 2>/dev/null || true
-module load conda/latest
-conda activate /work/bjzhang_umass_edu/.conda/envs/w1w2_bayes
-cd /work/pi_markos_umass_edu/bjzhang_umass_edu/w1w2_bayes
+source /cache/home/bj394/w1w2_bayes/mnist/_env.sh
 
 echo "=== ${NAME} ==="
 echo "Job: \$SLURM_JOB_ID  Node: \$(hostname)"
-echo "GPU: \$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo N/A)"
+echo "GPU: \$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo N/A)"
 echo "Start: \$(date)"
 python -c "import torch; assert torch.cuda.is_available(), 'No CUDA'; print(f'CUDA OK: {torch.cuda.get_device_name(0)}')"
 

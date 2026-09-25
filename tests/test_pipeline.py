@@ -37,7 +37,9 @@ FAST_TRAIN = dict(n_iters=20, batch_size=64, lr=1e-3, lam=0.01, n_steps=5,
 
 FAST_GPA = dict(K=5, eta=0.01, L=1.0, disc_steps=1, disc_lr=0.001,
                 batch_size=64, gp_weight=0.0, disc_hidden=16,
-                disc_layers=2, formulation='LT')
+                disc_layers=2, formulation='LT',
+                normalize_grad=False, disc_optimizer='adam',
+                disc_reset_every=0)
 
 
 # ── Step 1: Train ──
@@ -302,6 +304,7 @@ def _make_args(command, **kwargs):
     kwargs.setdefault('problem', None)
     kwargs.setdefault('n_train', 10000)
     kwargs.setdefault('seed', 42)
+    kwargs.setdefault('source_samples', None)
     return SimpleNamespace(**kwargs)
 
 
